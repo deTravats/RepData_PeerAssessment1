@@ -1,25 +1,181 @@
 ---
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+title: 'Reproducible Research : Course Project 1'
+author: "Louis Stavart"
+date: "`r Sys.Date()`"
+output: html_document
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This is an R Markdown document in which I put all the code needed to fulfill the Week 2 assignment of the Reproducible Research course. 
+
+
 
 
 ## Loading and preprocessing the data
 
+This is the code to read the file. 
+
+```{r reading, echo=TRUE}
+unzip("repdata_data_activity.zip", exdir = "./Activity")
+setwd(dir = "./Activity")
+
+library(data.table)
+library(dplyr)
+
+act <- read.csv("./activity.csv", header = TRUE, sep = ",", na.strings = "NA")
+```
+
+I'm looking some features of the data. 
+
+There is no need to change the format of the table (already set in "data.frame"). But it could be interesting to convert the date into the *right* format instead of the *character* one. 
+
+```{r justlooking, echo = TRUE}
+act$date <- as.POSIXct(act$date, tryFormats = "%Y-%m-%d")
+
+dim(act)
+head(act)
+str(act)
+summary(act)
+```
+
+There is no need to change the format of the table (already set in "data.frame"). But it could be interesting to convert the date into the *right* format instead of the *character* one. 
 
 
-## What is mean total number of steps taken per day?
+
+
+## What is the mean total number of steps taken per day ?
+
+First, I'll calculate the total amount of steps taken each day.
+
+```{R stepday, echo = TRUE}
+stepday <- aggregate(act$steps ~ act$date, FUN = sum, na.rm = TRUE)
+colnames(stepday) <- c("Date", "Steps")
+```
+
+Then I'll do an histogram. I set the breaks at 20 so that each block represents a range of about 1000 steps.  
+
+```{r histogram, echo = TRUE}
+hist(stepday$Steps, breaks = 20, col = "darkorange", xlab = "Steps", ylab = "Number of days with that number of steps", main = "Histogram of total number of steps per day")
+```
+
+Here are the mean and median of the total number of steps taken each day. 
+
+```{r stepmean, echo = TRUE}
+mean <- mean(stepday$Steps, na.rm = TRUE)
+median <- median(stepday$Steps, na.rm = TRUE)
+
+```
+
+The mean of the total number of steps a day is **`r mean`** steps and the median is **`r median`** steps. 
+
 
 
 
 ## What is the average daily activity pattern?
 
+This is a time series plot of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis). 
+
+```{r daypattern, echo = TRUE}
+inter_step <- act %>% group_by(interval) %>% summarise(steps = mean(steps, na.rm =TRUE))
+
+with(inter_step, plot(x = interval, y = steps, type = 'l', main = "Average daily activity pattern by interval", xlab = "5-min Intervals", ylab = "Average total number of steps", col = "darkblue"))
+```
+
+Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps ?
+
+```{r maxnuminterval, echo = TRUE}
+maximum <- inter_step[inter_step$steps == max(inter_step$steps), ]
+max_step <- max(inter_step$steps)
+max_interval <- maximum[[1]]
+```
+
+The **`r max_interval`th** interval contains an average of **`r max_step`** steps. 
+
+
 
 
 ## Imputing missing values
 
+```{r na, echo=TRUE}
+
+na_sum <- sum(is.na(act$steps))
+na_per <- mean(is.na(act$steps)) * 100
+```
+
+There are **`r na_sum`** missing values in the dataset (**`r na_per`%** of the total of observations).
+
+I created a new dataset called *actNA* with all the missing values filled in with the average of the interval.
+So, for each row, if there were an NA value, this NA value was replaced by the mean in that interval. 
+
+```{r newdata, echo = TRUE}
+nrow_NA <- numeric(nrow(act))
+for(i in 1:nrow(act)){
+  if(is.na(act[i, "steps"]) == TRUE){
+    nrow_NA[i] <- filter(inter_step,interval==act[i,"interval"]) %>% select(steps)
+  }
+  else{
+    nrow_NA[i] <- act[i, "steps"]
+  }
+}
+
+actNA <- mutate(act, NewNA = nrow_NA)
+head(actNA)
+
+```
+
+Now, I make an another histogram with that new table. 
+
+```{r histogramNA, echo = TRUE}
+stepday_withNA <- with(actNA, aggregate(as.numeric(NewNA) ~ date, FUN = sum, na.rm = FALSE))
+colnames(stepday_withNA) <- c("Date", "Steps_withNA")
+hist(stepday_withNA$Steps_withNA, breaks = 20, col = "darkgreen", xlab = "Steps with NA", ylab = "Number of days with that number of steps", main = "Histogram of total number of steps per day")
+
+mean_withNA <- mean(stepday_withNA$Steps_withNA, na.rm = FALSE)
+median_withNA <- median(stepday_withNA$Steps_withNA, na.rm = FALSE)
+```
+
+Now, with replaced NA's, the mean of the total number of steps a day is **`r mean_withNA`** steps and the median is **`r median_withNA`** steps. 
+
+The new mean and median have moved towards the mean and median the first histogram because we added 8 days with that mean. Those days weren't taken into account in the first histogram because they had missing data the whole day.  
+
+We added 15.09% of the dataset with the same number/mean.But an other reason could be that I did a mistake in my code...
+
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+So, I needed to create a new factor variable in the dataset with two levels – “weekday” and “weekend” indicating whether a given date is a weekday or weekend day.
+
+```{r wefactor, echo = TRUE}
+library(lubridate)
+actNA$date <- as.POSIXct(actNA$date)
+is.weekday <- function(date){
+  if(weekdays(date) %in% c("Samedi","Dimanche")){result <- "Weekend"}
+  else{result <- "Weekday"}
+  result
+}
+actNA <- mutate(actNA,date=ymd(date)) %>% mutate(day=sapply(date,is.weekday))
+table(actNA$day)
+```
+
+This is the panel according to days.
+
+```{r weekplot, echo=TRUE}
+library(ggplot2)
+inter_step_day <- actNA %>% group_by(interval, day) %>% summarise(steps = mean(steps, na.rm =TRUE))
+ggplot(inter_step_day, aes(interval, steps)) +
+  geom_line() +
+  facet_wrap(~day, nrow = 2) +
+  xlab("5-min interval") +
+  ylab("Average number of steps")
+```
+
+This was hard but I managed to do it. 
+See you for the next assignment!
+
+
